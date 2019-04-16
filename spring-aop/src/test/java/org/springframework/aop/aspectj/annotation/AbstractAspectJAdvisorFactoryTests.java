@@ -71,7 +71,16 @@ import static org.junit.Assert.*;
  * @author Phillip Webb
  */
 public abstract class AbstractAspectJAdvisorFactoryTests {
-
+	/*  8.对比Vector、ArrayList、LinkedList有何区别？
+		Java 提供的默认排序算法，具体是什么排序方式以及设计思路等。
+		对比Hashtable、HashMap、TreeMap有什么不同？
+		9.如何解决　Hash　冲突
+		HashMap 的并发问题？
+		10.如何保证集合是线程安全的? ConcurrentHashMap如何实现高效地线程安全？
+		为什么需要ConcurrentHashMap
+		ConcurrentHashMap 1.7分析
+		在 Java 8 和之后的版本中，ConcurrentHashMap 发生了哪些变化呢？
+		有没有典型的场景需要使用类似 ConcurrentHashMap 这样的并发容器呢？*/
 	/**
 	 * To be overridden by concrete test subclasses.
 	 * @return the fixture

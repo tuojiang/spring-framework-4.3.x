@@ -243,14 +243,17 @@ public abstract class AbstractBeanDefinitionReader implements EnvironmentCapable
 			return loadCount;
 		}
 	}
-
+	// 上面虽然有两个分支，不过第二个分支很快通过解析路径转换为 Resource 以后也会进到这里
 	@Override
 	public int loadBeanDefinitions(String... locations) throws BeanDefinitionStoreException {
 		Assert.notNull(locations, "Location array must not be null");
 		int counter = 0;
+		// 注意这里是个 for 循环，也就是每个文件是一个 resource
 		for (String location : locations) {
+			// 继续往下看
 			counter += loadBeanDefinitions(location);
 		}
+		// 最后返回 counter，表示总共加载了多少的 BeanDefinition
 		return counter;
 	}
 

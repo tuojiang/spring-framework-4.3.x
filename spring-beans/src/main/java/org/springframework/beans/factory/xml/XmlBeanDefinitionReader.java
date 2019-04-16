@@ -303,7 +303,18 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 	public int loadBeanDefinitions(Resource resource) throws BeanDefinitionStoreException {
 		return loadBeanDefinitions(new EncodedResource(resource));
 	}
-
+/*volatile 的实现原理？内存可见性　禁止指令重排序，每个线程有一个工作内存，共享主内存的数据
+* 内存屏障实现的，它就是一个cpu指令，在运行时，编译器和处理器会对指令重排序，JMM为了保证在不同的编译器和处理器都有相同的结果，通过
+* 插入特定的内存屏障来禁止特定类型的处理器和编译器重排序，添加一个内存屏障告诉编译器和处理，无论什么指令都不能和这条指令重排序，JMM中有工作内存和主内存
+* 对于普通变量，读操作会优先读取工作内存的数据，工作内存不存在，从主内存中拷贝一份到工作内存，写的话只是从修改工作内存上的副本数据
+* 这样其他线程无法读取最新值，对于volatile变量，读操作JMM会把工作内存的值设置为无效，直接从主内存中读取，写操作时把工作内存的值刷新到
+* 主内存中，使得其他线程可见，进一步说，volatile修饰的变量在汇编代码中其实添加了一个lock前缀指令，它其实相当于上面的内存屏障，提供了２个作用，
+* 把当前cpu缓存行的数据刷新到主内存，这个写回操作会导致其他cpu缓存了当前内存地址的值无效,因为cpu为了提供性能，并不直接和内存通信，而是将内存读取到
+* 内部缓存区l1,l2在进行操作，但操作完不确定何时回主内存中，当添加了volatile指令，cpu执行到lock指令时，回将当前缓存行数据刷新到主内存中，
+* 为了保证各个cpu缓存的一致性，每个cpu通过嗅探在总线上的数据来检查自己缓存的有效性，当发现缓存行对应的内存地址数据被修改，就会将缓存行数据置为无效
+* 当cpu读取该变量时，发现缓存行数据无效，就会直接从内存中读取数据到缓存行
+*
+* */
 	/**
 	 * Load bean definitions from the specified XML file.
 	 * @param encodedResource the resource descriptor for the XML file,
@@ -316,7 +327,7 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 		if (logger.isInfoEnabled()) {
 			logger.info("Loading XML bean definitions from " + encodedResource);
 		}
-
+        // 用一个 ThreadLocal 来存放配置文件资源
 		Set<EncodedResource> currentResources = this.resourcesCurrentlyBeingLoaded.get();
 		if (currentResources == null) {
 			currentResources = new HashSet<EncodedResource>(4);
@@ -329,10 +340,12 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 		try {
 			InputStream inputStream = encodedResource.getResource().getInputStream();
 			try {
+                // 获取输入流资源
 				InputSource inputSource = new InputSource(inputStream);
 				if (encodedResource.getEncoding() != null) {
 					inputSource.setEncoding(encodedResource.getEncoding());
 				}
+                // 核心部分是这里，往下面看
 				return doLoadBeanDefinitions(inputSource, encodedResource.getResource());
 			}
 			finally {
@@ -350,7 +363,16 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 			}
 		}
 	}
-
+	/*synchronized和ReentrantLock区别
+	  B是Lock锁的一个实现，是一个互斥同步器，多线程情况下，比A更优异的性能，
+	* 用法：A能够自动释放，B需要手动获取和释放
+	* 		A能够修改方法，类,B只能在代码快锁
+	* 		A比较灵活，B必须有释放锁的操作
+	*　特性：
+	* 	具备非阻塞的获取锁的操作tryLock（），能被中断的获取锁的lockInterruptibly（），
+	* 	超时获取锁tryLock(long timeout TimeUnit unit)
+	* 要在finally释放锁，不能将获取锁过程在try里面，否则发送异常，锁容易被释放。
+	* */
 	/**
 	 * Load bean definitions from the specified XML file.
 	 * @param inputSource the SAX InputSource to read from
@@ -360,7 +382,18 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 	public int loadBeanDefinitions(InputSource inputSource) throws BeanDefinitionStoreException {
 		return loadBeanDefinitions(inputSource, "resource loaded through SAX InputSource");
 	}
-
+	/*synchronized底层如何实现　锁的升级、降级　场景
+	* synchronized底层由一对cpu指令，MonitorEntry/MonitorExit组成，Monitor是同步的基本实现单元，jdk1.6以前，monitor的实现完全是依靠
+	* 操作系统内部的互斥，因为要进行用户态到内核态的切换，是一个重量级锁的操作，现在对synchronized进行改进，提供了三种不同的monitor实现
+	* 也就是三种不同的锁，偏斜锁，轻量级锁，重量级锁，大大提高了性能，锁的升级　降级就是jvm优化sychronized的运行机制，当jvm检测到不同的竞争时
+	*　就会切换到合适的锁的实现，当没有竞争时，默认是偏斜锁，jvm利用CAS操作在对象头的Mark Word部分设置线程ID,表示该对象偏向与该线程，并不设计真正的
+	* 互斥锁，这样做的假设是在很多应用场景中，很多对象的生命周期最多会被一个线程锁定，使用偏斜锁可以降低无竞争开销，如果有另外的线程尝试
+	*　锁定某个已经偏斜过的对象，JVM就需要撤销偏斜锁，并切换到轻量级锁，轻量级锁也依赖CAS操作Mark Word来获取锁，如果成功，切换为普通的轻量级锁，
+	* 否则，通过适应性自旋转换为重量级锁，锁的降级是在JVM进入安全点的时候，如果有空闲的monitor，就试图降级
+	*
+	* 自旋锁就是竞争失败了，并不会真正的挂起，试图做空循环来cas获取锁，如果成功，进入临界区，失败才真正挂起，
+	* 安全点就是程序在执行中的一些特殊位置，到该位置时，说明JVM当前状态是安全的，
+	* */
 	/**
 	 * Load bean definitions from the specified XML file.
 	 * @param inputSource the SAX InputSource to read from
@@ -375,7 +408,15 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 		return doLoadBeanDefinitions(inputSource, new DescriptiveResource(resourceDescription));
 	}
 
-
+	/*　
+	*　集中了java并发的各种基础工具类，具体包括
+	* 比synchronized更加高级的各种同步结构，countdownlatch,cyclicBarrier,Sempahore等
+	* 利用sempahore做资源控制器，限制同时进行工作的线程数等
+	* 各种线程安全的容器，ConcurrentHashMap,有序的ConcurrentSkipListMap,或者通过快照机制，实现线程安全的CopyOnWriteArrayList
+	* 动态数组等
+	* 各种并发队列的实现，如BlockedQueue实现，典型的ArrayBlockingQueue,synchorousQueue,priorityBlockingQueue等
+	* 强大的Executor框架，创建各种不同的线程池，调度任务运行，
+	* */
 	/**
 	 * Actually load bean definitions from the specified XML file.
 	 * @param inputSource the SAX InputSource to read from
@@ -388,7 +429,9 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 	protected int doLoadBeanDefinitions(InputSource inputSource, Resource resource)
 			throws BeanDefinitionStoreException {
 		try {
+            // 这里就不看了，将 xml 文件转换为 Document 对象
 			Document doc = doLoadDocument(inputSource, resource);
+            // 继续
 			return registerBeanDefinitions(doc, resource);
 		}
 		catch (BeanDefinitionStoreException ex) {
@@ -415,7 +458,13 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 					"Unexpected exception parsing XML document from " + resource, ex);
 		}
 	}
-
+	/*　CountDownLatch 和 CyclicBarrier 区别
+		A不可以重置，无法重用，B没有限制，可以重用
+	*	使用　countdown/await 调用await的线程阻塞等待countdown足够的次数，是事件操作，
+	*		B就是await,当所以的线程都调用了await，才会继续执行任务，并自动进行重置，如果调用reset()，但是线程还在等待，就会抛出
+	*		BrokenBarrierException异常，
+	*	CycliBarrier侧重点是线程，而不是调用事件，典型应用场景是用来等待并发线程结束。
+	* */
 	/**
 	 * Actually load the specified document using the configured DocumentLoader.
 	 * @param inputSource the SAX InputSource to read from
@@ -502,9 +551,11 @@ public class XmlBeanDefinitionReader extends AbstractBeanDefinitionReader {
 	 * @see #setDocumentReaderClass
 	 * @see BeanDefinitionDocumentReader#registerBeanDefinitions
 	 */
+    // 返回值：返回从当前配置文件加载了多少数量的 Bean
 	public int registerBeanDefinitions(Document doc, Resource resource) throws BeanDefinitionStoreException {
 		BeanDefinitionDocumentReader documentReader = createBeanDefinitionDocumentReader();
 		int countBefore = getRegistry().getBeanDefinitionCount();
+        // 这里
 		documentReader.registerBeanDefinitions(doc, createReaderContext(resource));
 		return getRegistry().getBeanDefinitionCount() - countBefore;
 	}
